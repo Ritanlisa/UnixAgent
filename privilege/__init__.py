@@ -3,7 +3,8 @@
 
 from .privilege import Privilege
 from .operations import ShellPrivilege, IOPrivilege
-from .hire import HirePrivilege
+from .hire import HirePrivilege, HireOperation
 from .approval import ApprovalPrivilege
+from .external_tool import ExternalToolPrivilege
 
-__all__ = ['Privilege', 'ShellPrivilege', 'IOPrivilege', 'HirePrivilege', 'ApprovalPrivilege']
+__all__ = ['Privilege', 'ShellPrivilege', 'IOPrivilege', 'HirePrivilege', 'HireOperation', 'ApprovalPrivilege', 'ExternalToolPrivilege']
