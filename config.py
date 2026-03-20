@@ -20,10 +20,25 @@ class RootConfig:
 
 
 @dataclass(slots=True)
+class RuntimePromptConfig:
+    approval_prompt_template: str
+    todo_prompt_template: str
+    approval_memory_compact_template: str
+
+
+@dataclass(slots=True)
+class RuntimeConfig:
+    max_rounds: int
+    initial_root_todos: List[str]
+    prompts: RuntimePromptConfig
+
+
+@dataclass(slots=True)
 class Settings:
     root: RootConfig
     models: List[str]
     mcp_executor: str
+    runtime: RuntimeConfig
 
 
 @dataclass(slots=True)
@@ -58,10 +73,27 @@ def load_settings(settings_path: Path, secrets_path: Path) -> tuple[Settings, Se
         context_window_limit=int(root_data.get("context_window_limit", 8192)),
     )
 
+    runtime_data = settings_data.get("runtime", {})
+    prompts_data = runtime_data.get("prompts", {})
+    initial_root_todos = runtime_data.get("initial_root_todos", [])
+    if not isinstance(initial_root_todos, list):
+        initial_root_todos = []
+
+    runtime = RuntimeConfig(
+        max_rounds=int(runtime_data.get("max_rounds", 25)),
+        initial_root_todos=[str(item) for item in initial_root_todos if str(item).strip()],
+        prompts=RuntimePromptConfig(
+            approval_prompt_template=str(prompts_data.get("approval_prompt_template", "")),
+            todo_prompt_template=str(prompts_data.get("todo_prompt_template", "")),
+            approval_memory_compact_template=str(prompts_data.get("approval_memory_compact_template", "")),
+        ),
+    )
+
     settings = Settings(
         root=root,
         models=models if models else [root.model_name],
         mcp_executor=str(settings_data.get("mcp", {}).get("executor", "dry-run")),
+        runtime=runtime,
     )
     secrets = Secrets(model_bindings=dict(secrets_data.get("model_bindings", {})))
     return settings, secrets

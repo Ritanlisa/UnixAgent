@@ -132,6 +132,7 @@ class MCPResult:
     reason: str
     timestamp: str
     approval_request_id: Optional[str] = None
+    execution_output: Optional[Dict[str, Any]] = None
 
 
 @dataclass(slots=True)
@@ -169,6 +170,7 @@ class ApprovalRequestEntry:
     request: MCPRequest
     decision_reason: str
     execution_message: Optional[str] = None
+    execution_output: Optional[Dict[str, Any]] = None
 
 
 class AgentGroup:
@@ -631,6 +633,7 @@ class AgentGroup:
                 current.status = final_status
                 current.finished_at = AgentGroup._utc_now()
                 current.execution_message = execution.message
+                current.execution_output = execution.output
 
     @staticmethod
     def approve_request(approver: Agent, request_id: str, accept: bool, reason: str = "") -> MCPResult:
@@ -648,6 +651,7 @@ class AgentGroup:
                     reason="approval request does not exist",
                     timestamp=timestamp,
                     approval_request_id=request_id,
+                    execution_output=None,
                 )
 
             if entry.status != "pending":
@@ -661,6 +665,7 @@ class AgentGroup:
                     reason=f"approval request is not pending (current={entry.status})",
                     timestamp=timestamp,
                     approval_request_id=request_id,
+                    execution_output=None,
                 )
 
             if approver != entry.approver:
@@ -674,6 +679,7 @@ class AgentGroup:
                     reason="only assigned approver can decide this request",
                     timestamp=timestamp,
                     approval_request_id=request_id,
+                    execution_output=None,
                 )
 
             if not AgentGroup._can_approve_request(approver, entry.request):
@@ -687,6 +693,7 @@ class AgentGroup:
                     reason="approver no longer has required approval scope/execution privileges",
                     timestamp=timestamp,
                     approval_request_id=request_id,
+                    execution_output=None,
                 )
 
             entry.decided_at = timestamp
@@ -719,6 +726,7 @@ class AgentGroup:
                 reason=reject_reason,
                 timestamp=timestamp,
                 approval_request_id=request_id,
+                execution_output=None,
             )
 
         worker = threading.Thread(
@@ -740,6 +748,7 @@ class AgentGroup:
             reason=accept_reason,
             timestamp=timestamp,
             approval_request_id=request_id,
+            execution_output=None,
         )
 
     @staticmethod
@@ -771,6 +780,7 @@ class AgentGroup:
                     approver=request.requested_approver.name,
                     reason=reason,
                     timestamp=timestamp,
+                    execution_output=None,
                 )
 
             approver_for_operation = AgentGroup._select_approver(request)
@@ -794,6 +804,7 @@ class AgentGroup:
                     approver=None,
                     reason=reason,
                     timestamp=timestamp,
+                    execution_output=None,
                 )
 
         if requester.has_all_privileges(request.required_privileges):
@@ -831,6 +842,7 @@ class AgentGroup:
                 approver=None,
                 reason=execute_reason,
                 timestamp=timestamp,
+                execution_output=execution.output,
             )
 
         approver = AgentGroup._select_approver(request)
@@ -853,6 +865,7 @@ class AgentGroup:
                 approver=None,
                 reason=reason,
                 timestamp=timestamp,
+                execution_output=None,
             )
 
         approval_entry = AgentGroup._create_approval_request(request, approver)
@@ -876,6 +889,7 @@ class AgentGroup:
             reason=reason,
             timestamp=timestamp,
             approval_request_id=approval_entry.request_id,
+            execution_output=None,
         )
 
     @staticmethod

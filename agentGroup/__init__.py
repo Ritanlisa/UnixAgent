@@ -9,6 +9,7 @@ from .mcp_executor import (
 	HttpMCPToolExecutor,
 	MCPExecutionResponse,
 	MCPToolExecutor,
+	OllamaMCPToolExecutor,
 )
 from .memory import ConversationSummaryBufferMemory, append_memory, build_context, create_memory, memory_from_dict, memory_to_dict
 
@@ -27,6 +28,7 @@ __all__ = [
 	'ExternalToolCaller',
 	'DryRunExternalToolCaller',
 	'HttpMCPToolExecutor',
+	'OllamaMCPToolExecutor',
 	'ConversationSummaryBufferMemory',
 	'create_memory',
 	'append_memory',

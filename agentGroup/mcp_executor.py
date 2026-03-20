@@ -107,3 +107,59 @@ class HttpMCPToolExecutor(MCPToolExecutor):
             return MCPExecutionResponse(success=False, message=f"url error: {exc.reason}")
         except Exception as exc:
             return MCPExecutionResponse(success=False, message=f"unexpected executor error: {exc}")
+
+
+class OllamaMCPToolExecutor(MCPToolExecutor):
+    def __init__(self, timeout_seconds: float = 60.0, temperature: float = 0.2):
+        self.timeout_seconds = timeout_seconds
+        self.temperature = temperature
+
+    @staticmethod
+    def _build_prompt(action: str, payload: Dict[str, Any]) -> str:
+        payload_text = json.dumps(payload, ensure_ascii=False)
+        return (
+            "You are an execution assistant.\n"
+            "Given the requested action and payload, produce a concise execution plan and expected result.\n"
+            f"Action: {action}\n"
+            f"Payload: {payload_text}\n"
+            "Output in plain text."
+        )
+
+    def execute(self, *, executor: "Agent", action: str, payload: Dict[str, Any]) -> MCPExecutionResponse:
+        prompt = self._build_prompt(action, payload)
+        body = {
+            "model": executor.model_name,
+            "prompt": prompt,
+            "stream": False,
+            "options": {
+                "temperature": self.temperature,
+            },
+        }
+
+        data = json.dumps(body).encode("utf-8")
+        headers = {"Content-Type": "application/json"}
+        req = urllib_request.Request(executor.api_url, data=data, headers=headers, method="POST")
+
+        try:
+            with urllib_request.urlopen(req, timeout=self.timeout_seconds) as response:
+                raw = response.read().decode("utf-8")
+                if not raw:
+                    return MCPExecutionResponse(success=False, message="ollama returned empty response")
+                parsed = json.loads(raw)
+                text = str(parsed.get("response", "")).strip()
+                return MCPExecutionResponse(
+                    success=bool(parsed.get("done", True)),
+                    message="ollama generation completed",
+                    output={
+                        "model": parsed.get("model", executor.model_name),
+                        "text": text,
+                        "eval_count": parsed.get("eval_count"),
+                        "prompt_eval_count": parsed.get("prompt_eval_count"),
+                    },
+                )
+        except urllib_error.HTTPError as exc:
+            return MCPExecutionResponse(success=False, message=f"ollama http error {exc.code}: {exc.reason}")
+        except urllib_error.URLError as exc:
+            return MCPExecutionResponse(success=False, message=f"ollama url error: {exc.reason}")
+        except Exception as exc:
+            return MCPExecutionResponse(success=False, message=f"ollama executor error: {exc}")
