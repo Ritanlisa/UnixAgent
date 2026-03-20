@@ -136,6 +136,11 @@ model_bindings:
 - `parameter_count`：模型参数规模（用于统计/展示）。
 - `price_per_million_tokens`：每百万 token 价格，用于计算 `food_cost`。
 
+默认策略说明：
+
+- 对本地 Ollama 模型，默认将 `price_per_million_tokens` 设为 `0.0`（本地推理不计云侧 token 费用）。
+- 若接入云模型，可按真实计费再填写非 0 单价。
+
 ---
 
 ## 5. 运行流程总览
@@ -367,6 +372,10 @@ AgentGroup.load_state(path)
 ### Q4：为什么授权/招募突然失败？
 
 可能触发了 root 设置的 `CostPolicy` 限制（总人数、组人数、保费上限、单 Agent 权限上限）。
+
+### Q5：测试本地 Ollama 时如何禁用 cloud 模型？
+
+测试时建议仅保留或仅启用不包含 `:cloud` 后缀的模型条目；例如在临时测试脚本中先过滤 `model_name` 含 `:cloud` 的绑定再启动系统。
 
 ---
 
