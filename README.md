@@ -83,6 +83,8 @@ uv sync
 python .\main.py
 ```
 
+`main.py` 为运行入口：root 会自动创建默认组织、下放权限、分配任务并推进审批执行流程。
+
 运行完整治理演示：
 
 ```bash
