@@ -53,7 +53,7 @@ class Privilege(ABC):
     
     @abstractmethod
     def __getattr__(self, name: str) -> Any:
-        return getattr(self, name)
+        raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
     
     ## Read-only attributes protection after initialization
 
@@ -62,14 +62,14 @@ class Privilege(ABC):
         if not getattr(self, '__writeprotection', False):
             return super().__setattr__(name, value)
         else:
-            return None
+            raise AttributeError
     
     def __delattr__(self, name: str) -> None:
         """Delete an attribute of the privilege must be forbidden after initialization."""
         if not getattr(self, '__writeprotection', False):
             return super().__delattr__(name)
         else:
-            return None
+            raise AttributeError
     
     ## Define other comparison operators based on the less than & equal to operators
 
