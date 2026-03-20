@@ -8,6 +8,7 @@ from enum import Enum
 
 class Privilege(ABC):
     def __init__(self, *args, **kwargs):
+        self.__writeprotection = True
         pass
     
     @abstractmethod
@@ -51,18 +52,24 @@ class Privilege(ABC):
         return hash(frozenset(self.to_dict().items()))
     
     @abstractmethod
-    def __getattribute__(self, name: str) -> Any:
-        return super().__getattribute__(name)
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self, name)
     
     ## Read-only attributes protection after initialization
 
     def __setattr__(self, name: str, value: Any) -> None:
         """Set an attribute of the privilege must be forbidden after initialization."""
-        return None
+        if not getattr(self, '__writeprotection', False):
+            return super().__setattr__(name, value)
+        else:
+            return None
     
     def __delattr__(self, name: str) -> None:
         """Delete an attribute of the privilege must be forbidden after initialization."""
-        return None
+        if not getattr(self, '__writeprotection', False):
+            return super().__delattr__(name)
+        else:
+            return None
     
     ## Define other comparison operators based on the less than & equal to operators
 
