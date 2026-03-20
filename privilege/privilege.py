@@ -1,12 +1,28 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 from abc import ABC, abstractmethod
-from typing import Any, Optional
+from typing import Any, List, Optional
 from enum import Enum
 
 ## Virtual Base Class for Privilege Management
 
 class Privilege(ABC):
+    
+    @staticmethod
+    @abstractmethod
+    def FullPrivilege() -> List['Privilege']:
+        """Return a Privilege instance that represents full privileges."""
+        Privileges = []
+        for subclass in Privilege.__subclasses__():
+            Privileges.append(subclass.FullPrivilege())
+        return Privileges
+
+    @abstractmethod
+    def ensurance(self) -> float:
+        '''Return the ensurance cost of this privilege. Higher Ensurance means higher risk.'''
+        return float('inf') # By default, a privilege has infinite ensurance cost, which means it is not allowed to be used without explicit permission.
+
+    @abstractmethod
     def __init__(self, *args, **kwargs):
         self.__writeprotection = True
         pass
@@ -38,6 +54,11 @@ class Privilege(ABC):
     def __lt__(self, other: 'Privilege') -> bool:
         """Check if this privilege is less than another privilege."""
         pass
+    
+    @abstractmethod
+    def __gt__(self, other: 'Privilege') -> bool:
+        """Check if this privilege is greater than another privilege."""
+        pass
 
     @abstractmethod
     def __eq__(self, other: object) -> bool:
@@ -45,7 +66,7 @@ class Privilege(ABC):
         if not isinstance(other, Privilege):
             return False
         return True
-
+    
     @abstractmethod
     def __hash__(self) -> int:
         """Return a hash value for the privilege."""
@@ -73,13 +94,9 @@ class Privilege(ABC):
         """Check if this privilege is less than or equal to another privilege."""
         return self.__lt__(other) or self.__eq__(other)
     
-    def __gt__(self, other: 'Privilege'):
-        """Check if this privilege is greater than another privilege."""
-        return other.__lt__(self)
-    
     def __ge__(self, other: 'Privilege'):
         """Check if this privilege is greater than or equal to another privilege."""
-        return other.__lt__(self) or self.__eq__(other)
+        return self.__gt__(other) or self.__eq__(other)
 
     def __ne__(self, other: object):
         """Check if this privilege is not equal to another privilege."""
