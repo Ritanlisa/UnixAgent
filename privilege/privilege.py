@@ -11,12 +11,12 @@ class Privilege(ABC):
         pass
     
     @abstractmethod
-    def __str__(self):
+    def __str__(self) -> str:
         """Return a string representation of the privilege."""
         return ""
     
     @abstractmethod
-    def __repr__(self):
+    def __repr__(self) -> str:
         """Return a string representation of the privilege for debugging purposes."""
         return self.__str__()
 
@@ -34,19 +34,19 @@ class Privilege(ABC):
     ## Privilege Comparison Operators
 
     @abstractmethod
-    def __lt__(self, other: 'Privilege'):
+    def __lt__(self, other: 'Privilege') -> bool:
         """Check if this privilege is less than another privilege."""
         pass
 
     @abstractmethod
-    def __eq__(self, other: object):
+    def __eq__(self, other: object) -> bool:
         """Check if this privilege is equal to another privilege."""
         if not isinstance(other, Privilege):
             return False
         return True
 
     @abstractmethod
-    def __hash__(self):
+    def __hash__(self) -> int:
         """Return a hash value for the privilege."""
         return hash(frozenset(self.to_dict().items()))
     
