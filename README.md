@@ -8,10 +8,11 @@
 - `ApprovalPrivilege` 支持按“请求来源组 + 可审批权限范围 + 是否覆盖未来组”拆分。
 - `HirePrivilege` 支持按“可操作组 + 可执行治理动作 + 是否覆盖未来组”拆分。
 - 所有越权动作通过 MCP 风格请求流（`MCPRequest`）评估并执行。
+- 审批流为两阶段：先创建审批请求并通知审批者，审批者 `accept/reject` 后再由执行器异步落地。
 - 建组、改组、招募、剔除、下放权限、收回权限也可以作为治理操作走 MCP。
 - 审批将请求发起者与执行者分离，并记录审计日志。
 - 支持 Agent 间通信接口：对单个 Agent 发送消息、对用户组广播消息，并记录通信日志。
-- 成本分为 `food_tokens`（仅统计量）、`food_cost`（按模型每百万 token 单价折算）、`budget_api`、`wage_compute`、`insurance` 四类核算维度。
+- 成本分为 `food_tokens`（仅统计量）、`food_cost`（按模型每百万 token 单价折算）、`budget_api`、`wage_compute`、`insurance` 四类核算维度；其中工资会按时间持续累积（Agent 即使空闲也会增长）。
 - 新增 root 专属 `CostPolicy`（通过 MCP 治理操作更新），可约束总 Agent 数、单组 Agent 数、总保险成本、单 Agent 权限数。
 - 新增 `ExternalToolPrivilege`，用于控制外部工具调用权限。
 - 新增 `Operation` 抽象与子类（文件/Shell/外部工具），统一权限验证与执行流程。
@@ -24,6 +25,7 @@
 	- `Agent`：单个执行体，持有权限与成本台账。
 	- `CostPolicy`：root 管理的全局成本约束。
 	- `MessageEntry`：Agent 通信日志记录。
+	- `ApprovalRequestEntry`：异步审批请求记录（pending/accepted/rejected/executing/executed/failed）。
 	- `AgentGroup`：用户组模板、成员管理、权限下放/回收。
 	- `MCPRequest` / `MCPResult`：请求与执行结果。
 	- `execute_via_mcp`：审批 + 执行核心流程。
@@ -111,6 +113,7 @@ AgentGroup.configure_mcp_executor(HttpMCPToolExecutor(timeout_seconds=20.0))
 - `HttpMCPToolExecutor` 会向执行 Agent 的 `api_url` 发起 POST，请求头自动带 `Authorization: Bearer <api_key>`（若配置）。
 - 请求体包含 `action`、`payload`、`executor(name/group/model)`。
 - 审批判定同时校验：审批者是否拥有对应组的审批域、是否拥有被请求操作的执行权、审批域是否覆盖请求权限集合。
+- `execute_via_mcp(...)` 在需要审批时会返回 `approval_request_id`；审批者可调用 `AgentGroup.approve_request(approver, request_id, accept, reason)` 做决策。
 
 ## 外部工具调用接口
 

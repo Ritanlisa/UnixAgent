@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-from .agentGroup import AgentGroup, Agent, AuditEntry, CostPolicy, MCPRequest, MCPResult, MessageEntry
+from .agentGroup import AgentGroup, Agent, ApprovalRequestEntry, AuditEntry, CostPolicy, MCPRequest, MCPResult, MessageEntry
 from .mcp_executor import (
 	DryRunExternalToolCaller,
 	DryRunMCPToolExecutor,
@@ -15,6 +15,7 @@ from .memory import ConversationSummaryBufferMemory, append_memory, build_contex
 __all__ = [
 	'AgentGroup',
 	'Agent',
+	'ApprovalRequestEntry',
 	'CostPolicy',
 	'MCPRequest',
 	'MCPResult',

@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import json
+import threading
+import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -24,6 +26,7 @@ class CostLedger:
     food_cost: float = 0.0
     budget_api: float = 0.0
     wage_compute: float = 0.0
+    last_wage_accrual_at: Optional[str] = None
 
     def total(self, insurance_cost: float) -> float:
         return self.food_cost + self.budget_api + self.wage_compute + insurance_cost
@@ -128,6 +131,7 @@ class MCPResult:
     approver: Optional[str]
     reason: str
     timestamp: str
+    approval_request_id: Optional[str] = None
 
 
 @dataclass(slots=True)
@@ -153,12 +157,29 @@ class MessageEntry:
     content: str
 
 
+@dataclass(slots=True)
+class ApprovalRequestEntry:
+    request_id: str
+    status: str
+    created_at: str
+    decided_at: Optional[str]
+    finished_at: Optional[str]
+    requester: Agent
+    approver: Agent
+    request: MCPRequest
+    decision_reason: str
+    execution_message: Optional[str] = None
+
+
 class AgentGroup:
     rootGroup: ClassVar[Optional["AgentGroup"]] = None
     AgentGroups: ClassVar[List["AgentGroup"]] = []
     agents: ClassVar[List[Agent]] = []
     audit_log: ClassVar[List[AuditEntry]] = []
     message_log: ClassVar[List[MessageEntry]] = []
+    approval_requests: ClassVar[Dict[str, ApprovalRequestEntry]] = {}
+    approval_lock: ClassVar[threading.Lock] = threading.Lock()
+    wage_rate_per_second: ClassVar[float] = 0.0001
     tool_executor: ClassVar[MCPToolExecutor] = DryRunMCPToolExecutor()
     external_tool_caller: ClassVar[ExternalToolCaller] = DryRunExternalToolCaller()
     model_bindings: ClassVar[Dict[str, Dict[str, str | int | float]]] = {}
@@ -194,11 +215,23 @@ class AgentGroup:
         AgentGroup.agents = []
         AgentGroup.audit_log = []
         AgentGroup.message_log = []
+        AgentGroup.approval_requests = {}
         AgentGroup.cost_policy = CostPolicy()
 
     @staticmethod
     def _utc_now() -> str:
         return datetime.now(tz=timezone.utc).isoformat()
+
+    @staticmethod
+    def _utc_now_dt() -> datetime:
+        return datetime.now(tz=timezone.utc)
+
+    @staticmethod
+    def _parse_iso_utc(value: str) -> datetime:
+        dt = datetime.fromisoformat(value)
+        if dt.tzinfo is None:
+            return dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc)
 
     @staticmethod
     def all() -> List["AgentGroup"]:
@@ -388,11 +421,31 @@ class AgentGroup:
 
     @staticmethod
     def _consume_cost(agent: Agent, food_tokens: int, budget_api: float, wage_compute: float) -> None:
+        AgentGroup._accrue_wage(agent)
         safe_tokens = max(food_tokens, 0)
         agent.cost.food_tokens += safe_tokens
         agent.cost.food_cost += (float(safe_tokens) / 1_000_000.0) * max(agent.price_per_million_tokens, 0.0)
         agent.cost.budget_api += max(budget_api, 0.0)
         agent.cost.wage_compute += max(wage_compute, 0.0)
+
+    @staticmethod
+    def _accrue_wage(agent: Agent, now: Optional[datetime] = None) -> None:
+        current = now or AgentGroup._utc_now_dt()
+        if agent.cost.last_wage_accrual_at is None:
+            agent.cost.last_wage_accrual_at = current.isoformat()
+            return
+
+        last = AgentGroup._parse_iso_utc(agent.cost.last_wage_accrual_at)
+        delta_seconds = (current - last).total_seconds()
+        if delta_seconds > 0:
+            agent.cost.wage_compute += delta_seconds * max(AgentGroup.wage_rate_per_second, 0.0)
+            agent.cost.last_wage_accrual_at = current.isoformat()
+
+    @staticmethod
+    def _accrue_wage_all() -> None:
+        now = AgentGroup._utc_now_dt()
+        for agent in AgentGroup.agents:
+            AgentGroup._accrue_wage(agent, now=now)
 
     @staticmethod
     def _total_insurance_cost() -> float:
@@ -472,6 +525,7 @@ class AgentGroup:
 
     @staticmethod
     def _select_approver(request: MCPRequest) -> Optional[Agent]:
+        AgentGroup._accrue_wage_all()
         candidates = AgentGroup.all_agents()
         if request.requested_approver is not None:
             return request.requested_approver if AgentGroup._can_approve_request(request.requested_approver, request) else None
@@ -483,9 +537,216 @@ class AgentGroup:
         return min(eligible, key=lambda candidate: candidate.total_cost())
 
     @staticmethod
+    def _build_approval_message(request_id: str, request: MCPRequest, requester: Agent) -> str:
+        return (
+            f"approval request {request_id}: action={request.action}; "
+            f"from={requester.name}/{requester.group.name}; payload={request.payload}"
+        )
+
+    @staticmethod
+    def _create_approval_request(request: MCPRequest, approver: Agent) -> ApprovalRequestEntry:
+        request_id = str(uuid.uuid4())
+        entry = ApprovalRequestEntry(
+            request_id=request_id,
+            status="pending",
+            created_at=AgentGroup._utc_now(),
+            decided_at=None,
+            finished_at=None,
+            requester=request.requester,
+            approver=approver,
+            request=request,
+            decision_reason="",
+            execution_message=None,
+        )
+        with AgentGroup.approval_lock:
+            AgentGroup.approval_requests[request_id] = entry
+        AgentGroup.send_message_to_agent(
+            request.requester,
+            approver,
+            AgentGroup._build_approval_message(request_id, request, request.requester),
+        )
+        return entry
+
+    @staticmethod
+    def list_approval_requests(status: Optional[str] = None) -> List[ApprovalRequestEntry]:
+        with AgentGroup.approval_lock:
+            requests = list(AgentGroup.approval_requests.values())
+        if status is None:
+            return requests
+        normalized = status.strip().lower()
+        return [item for item in requests if item.status.lower() == normalized]
+
+    @staticmethod
+    def get_approval_request(request_id: str) -> Optional[ApprovalRequestEntry]:
+        with AgentGroup.approval_lock:
+            return AgentGroup.approval_requests.get(request_id)
+
+    @staticmethod
+    def _execute_approved_request(request_id: str) -> None:
+        with AgentGroup.approval_lock:
+            entry = AgentGroup.approval_requests.get(request_id)
+            if entry is None or entry.status != "accepted":
+                return
+            entry.status = "executing"
+
+        request = entry.request
+        approver = entry.approver
+        requester = entry.requester
+
+        AgentGroup._consume_cost(requester, request.estimated_food_tokens, request.estimated_budget_api, request.estimated_wage_compute)
+        AgentGroup._consume_cost(approver, 0, 0.0, request.estimated_wage_compute)
+
+        if request.operation is not None:
+            execution = request.operation.execute(
+                executor=approver,
+                tool_executor=AgentGroup.tool_executor,
+                external_tool_caller=AgentGroup.external_tool_caller,
+            )
+        else:
+            execution = AgentGroup.tool_executor.execute(
+                executor=approver,
+                action=request.action,
+                payload=request.payload,
+            )
+
+        final_status = "executed" if execution.success else "failed"
+        reason = "approved by agent with approval + execution privileges"
+        if not execution.success:
+            reason = f"approved but execution failed: {execution.message}"
+
+        AgentGroup._record_audit(
+            requester=requester,
+            action=request.action,
+            approved=execution.success,
+            reason=reason,
+            approver=approver,
+            executor=approver,
+        )
+        append_memory(requester.memory, "system", reason)
+        append_memory(approver.memory, "system", f"executed delegated request: {request.action}")
+
+        with AgentGroup.approval_lock:
+            current = AgentGroup.approval_requests.get(request_id)
+            if current is not None:
+                current.status = final_status
+                current.finished_at = AgentGroup._utc_now()
+                current.execution_message = execution.message
+
+    @staticmethod
+    def approve_request(approver: Agent, request_id: str, accept: bool, reason: str = "") -> MCPResult:
+        timestamp = AgentGroup._utc_now()
+        with AgentGroup.approval_lock:
+            entry = AgentGroup.approval_requests.get(request_id)
+            if entry is None:
+                return MCPResult(
+                    approved=False,
+                    executed=False,
+                    action="approval decision",
+                    requester="",
+                    executor=None,
+                    approver=approver.name,
+                    reason="approval request does not exist",
+                    timestamp=timestamp,
+                    approval_request_id=request_id,
+                )
+
+            if entry.status != "pending":
+                return MCPResult(
+                    approved=False,
+                    executed=False,
+                    action=entry.request.action,
+                    requester=entry.requester.name,
+                    executor=None,
+                    approver=approver.name,
+                    reason=f"approval request is not pending (current={entry.status})",
+                    timestamp=timestamp,
+                    approval_request_id=request_id,
+                )
+
+            if approver != entry.approver:
+                return MCPResult(
+                    approved=False,
+                    executed=False,
+                    action=entry.request.action,
+                    requester=entry.requester.name,
+                    executor=None,
+                    approver=approver.name,
+                    reason="only assigned approver can decide this request",
+                    timestamp=timestamp,
+                    approval_request_id=request_id,
+                )
+
+            if not AgentGroup._can_approve_request(approver, entry.request):
+                return MCPResult(
+                    approved=False,
+                    executed=False,
+                    action=entry.request.action,
+                    requester=entry.requester.name,
+                    executor=None,
+                    approver=approver.name,
+                    reason="approver no longer has required approval scope/execution privileges",
+                    timestamp=timestamp,
+                    approval_request_id=request_id,
+                )
+
+            entry.decided_at = timestamp
+            entry.decision_reason = reason
+            entry.status = "accepted" if accept else "rejected"
+
+        if not accept:
+            reject_reason = reason.strip() or "rejected by approver"
+            AgentGroup._record_audit(
+                requester=entry.requester,
+                action=entry.request.action,
+                approved=False,
+                reason=reject_reason,
+                approver=approver,
+                executor=None,
+            )
+            append_memory(entry.requester.memory, "system", reject_reason)
+            append_memory(approver.memory, "system", f"rejected approval request {request_id}: {entry.request.action}")
+            with AgentGroup.approval_lock:
+                current = AgentGroup.approval_requests.get(request_id)
+                if current is not None:
+                    current.finished_at = AgentGroup._utc_now()
+            return MCPResult(
+                approved=False,
+                executed=False,
+                action=entry.request.action,
+                requester=entry.requester.name,
+                executor=None,
+                approver=approver.name,
+                reason=reject_reason,
+                timestamp=timestamp,
+                approval_request_id=request_id,
+            )
+
+        worker = threading.Thread(
+            target=AgentGroup._execute_approved_request,
+            args=(request_id,),
+            daemon=True,
+        )
+        worker.start()
+        accept_reason = reason.strip() or "accepted and queued for asynchronous execution"
+        append_memory(approver.memory, "system", f"accepted approval request {request_id}: {entry.request.action}")
+        append_memory(entry.requester.memory, "system", accept_reason)
+        return MCPResult(
+            approved=True,
+            executed=False,
+            action=entry.request.action,
+            requester=entry.requester.name,
+            executor=approver.name,
+            approver=approver.name,
+            reason=accept_reason,
+            timestamp=timestamp,
+            approval_request_id=request_id,
+        )
+
+    @staticmethod
     def execute_via_mcp(request: MCPRequest) -> MCPResult:
         requester = request.requester
         timestamp = AgentGroup._utc_now()
+        AgentGroup._accrue_wage_all()
 
         append_memory(requester.memory, "request", f"{request.action} | payload={request.payload}")
 
@@ -594,42 +855,27 @@ class AgentGroup:
                 timestamp=timestamp,
             )
 
-        AgentGroup._consume_cost(requester, request.estimated_food_tokens, request.estimated_budget_api, request.estimated_wage_compute)
-        AgentGroup._consume_cost(approver, 0, 0.0, request.estimated_wage_compute)
-        if request.operation is not None:
-            execution = request.operation.execute(
-                executor=approver,
-                tool_executor=AgentGroup.tool_executor,
-                external_tool_caller=AgentGroup.external_tool_caller,
-            )
-        else:
-            execution = AgentGroup.tool_executor.execute(
-                executor=approver,
-                action=request.action,
-                payload=request.payload,
-            )
-        reason = "approved by agent with approval + execution privileges"
-        if not execution.success:
-            reason = f"approved but execution failed: {execution.message}"
+        approval_entry = AgentGroup._create_approval_request(request, approver)
+        reason = f"approval request created and sent to approver (request_id={approval_entry.request_id})"
         AgentGroup._record_audit(
             requester=requester,
             action=request.action,
-            approved=execution.success,
+            approved=False,
             reason=reason,
             approver=approver,
-            executor=approver,
+            executor=None,
         )
         append_memory(requester.memory, "system", reason)
-        append_memory(approver.memory, "system", f"executed delegated request: {request.action}")
         return MCPResult(
-            approved=True,
-            executed=execution.success,
+            approved=False,
+            executed=False,
             action=request.action,
             requester=requester.name,
-            executor=approver.name,
+            executor=None,
             approver=approver.name,
             reason=reason,
             timestamp=timestamp,
+            approval_request_id=approval_entry.request_id,
         )
 
     @staticmethod
@@ -695,6 +941,7 @@ class AgentGroup:
                         "food_cost": agent.cost.food_cost,
                         "budget_api": agent.cost.budget_api,
                         "wage_compute": agent.cost.wage_compute,
+                        "last_wage_accrual_at": agent.cost.last_wage_accrual_at,
                     },
                 }
             )
@@ -797,6 +1044,7 @@ class AgentGroup:
                     food_cost=float(cost_data.get("food_cost", 0.0)),
                     budget_api=float(cost_data.get("budget_api", 0.0)),
                     wage_compute=float(cost_data.get("wage_compute", 0.0)),
+                    last_wage_accrual_at=cost_data.get("last_wage_accrual_at"),
                 ),
             )
             group.members.append(agent)
@@ -833,6 +1081,8 @@ class AgentGroup:
     def group_cost_report(requester: Agent) -> Dict[str, Any]:
         if not requester.is_root:
             raise PermissionError("Only root agent can manage global cost reports.")
+
+        AgentGroup._accrue_wage_all()
 
         details = []
         total = 0.0
@@ -886,6 +1136,7 @@ class AgentGroup:
             privileges=list(self.privileges),
             memory=create_memory(max_token_limit=self.context_window_limit),
             is_root=is_root,
+            cost=CostLedger(last_wage_accrual_at=AgentGroup._utc_now()),
         )
         self.members.append(agent)
         AgentGroup.agents.append(agent)
