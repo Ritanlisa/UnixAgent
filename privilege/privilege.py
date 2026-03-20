@@ -51,10 +51,6 @@ class Privilege(ABC):
         """Return a hash value for the privilege."""
         return hash(frozenset(self.to_dict().items()))
     
-    @abstractmethod
-    def __getattr__(self, name: str) -> Any:
-        raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
-    
     ## Read-only attributes protection after initialization
 
     def __setattr__(self, name: str, value: Any) -> None:
