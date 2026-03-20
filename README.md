@@ -180,17 +180,14 @@ flowchart TD
 	- `allowTargetAgentGroup`：可操作的目标组集合。
 	- `allowAllCurrentAndFutureGroups`：是否覆盖当前与未来组。
 
-### 6.3 审批权限（代审批 + 代执行）
+### 6.3 审批权限（审批域）
 
 - `ApprovalPrivilege`
 	- `allowTargetAgentGroup`：允许向自己提审批请求的来源组。
-	- `allowPrivileges`：可审批并代执行的权限子集。
 	- `allowAllCurrentAndFutureGroups`：是否覆盖未来新增组。
-	- `allowAllPrivileges`：是否拥有“全权限审批域”。
 
 ### 6.4 关键语义
 
-审批通过不等于可执行。
 系统会同时校验审批者是否满足：
 
 1. 审批域覆盖该请求；

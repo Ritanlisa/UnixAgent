@@ -16,9 +16,7 @@ def build_root_privileges() -> List[Privilege]:
         HirePrivilege(allowTargetAgentGroup=[], allowOperations=list(HireOperation), allowAllCurrentAndFutureGroups=True),
         ApprovalPrivilege(
             allowTargetAgentGroup=[],
-            allowPrivileges=[],
             allowAllCurrentAndFutureGroups=True,
-            allowAllPrivileges=True,
         ),
         ExternalToolPrivilege(allowTools=[], isWhitelist=False),
     ]
